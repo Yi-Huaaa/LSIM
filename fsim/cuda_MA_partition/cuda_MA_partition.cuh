@@ -14,11 +14,6 @@
 /* CPU */
 #include <fsim/fsim.hpp>
 
-/* Simulator */
-#include <fsim/cpu_simulator/galps_cpu_simulator.cuh>
-#include <fsim/cuda_simulator/galps_cuda_simulator.cuh>
-
-
 // error checking macro
 #define cudaCheckErrors(msg) \
     do { \
@@ -34,17 +29,8 @@
 
 
 // constexpr
-constexpr int _k = 16; // based on the kernel concurrency
-constexpr int _THRESHOLD_0 = 1024; // until which level should use levelization 
-constexpr int _NUM_GATES_PER_CL = 32;
-constexpr int _NUM_CLS_PER_BLOCK = 256; // cache: 32KB, others: 16KB
-constexpr int _NUM_GLOBAL_CLS = 14560; // cache: 32KB, others: 16KB
 constexpr uint32_t UINT32T_BITS = std::numeric_limits<uint32_t>::digits;
 constexpr int _num_threads = 512;  // for GPU kernel 
-// constexpr int _NUM_CLS_PER_BLOCK = 320; // cache: 40KB, others: 8KB
-// constexpr int _NUM_GLOBAL_CLS = 5616; // cache: 40KB, others: 8KB
-
-#define MA_PAR // with defined MA_PAR: MA partition and simulation 
 
 
 // Define the enum class
@@ -153,19 +139,14 @@ public:
   void prepare_gpu_simulation();
 
   void run(const size_t num_threads, const size_t NUM_SIMULATION_RDS);
-  void run_MA(const size_t num_threads, const size_t NUM_SIMULATION_RDS);
-  void freeMem() {
-    _free();
-  }
+  void freeMem() { _free(); }
 
 private:
   // Basic private members 
   int _num_PIs, _num_POs, _num_inner_gates, _num_wires;
   int _sum_pi_gates_pos;
-  // Include PIs, POs, Gates, 
 
   // Host memory 
-  // Read Graph 
   std::vector<GateType> _gate_type;
   int _szOfAdj; // size of _adj
   int *_adj; // fromGate -> toGate
@@ -177,8 +158,8 @@ private:
   int _num_fault; // for read file
   std::vector<Fault<int>> _faults;
 
-  int _num_pattern; // total number of patterns that need to be tested
-  size_t _num_rounds;  // ceiling(_num_pattern/UINT32T_BITS)
+  int _num_pattern; 
+  size_t _num_rounds;
   std::vector<Pattern> _patterns;
 
   // For levelization
@@ -205,8 +186,8 @@ private:
   int *_pi_gate_po_gate_type_gpu;
   int *_fault_gate_idx_gpu;
   size_t *_fault_SA_fault_val_gpu;
-  uint32_t *_patterns_gpu; // for MA: 就這兩個要特別改就好
-  uint32_t *_pi_gate_po_output_res_gpu; // for MA: 就這兩個要特別改就好
+  uint32_t *_patterns_gpu; 
+  uint32_t *_pi_gate_po_output_res_gpu; 
 
   /* Read files - CPU function */
   void _read_graph(std::istream &ckt);
@@ -215,11 +196,9 @@ private:
   void _read_fault(std::istream &flst);
 
   /* Levelization */
-  std::vector<int> _sampled_order;
   void _topological_sort(std::vector<std::vector<int>> &adj, 
                         std::vector<std::vector<int>> &invAdj,
                         std::vector<int> &order);
-  void _sampling();
   void _levelized(std::vector<std::vector<int>> &adj, 
                   std::vector<std::vector<int>> &invAdj);
   /* GPU Simulator preparation */
@@ -227,47 +206,6 @@ private:
   void _move_GateType_h2d();
   void _move_patterns_h2d();
   void _move_faults___h2d();
-  void _move_st_ld____h2d();
-
-  // MA preparation and simulation 
-  int _num_CLs;
-  std::vector<std::set<int>> _needed_CLs_all_blocks; 
-  std::vector<uint32_t> _num_needed_blocks;
-  int _used_num_blocks;
-  std::vector<int> _weight_table;
-  std::vector<int> _st_ld_CLIdxs;
-  std::vector<int> _st_ld_positi;
-  std::vector<int> _st_ld_CLs_index_table;
-  int *_st_ld_CLIdxs_gpu;
-  int *_st_ld_positi_gpu;
-  int *_st_ld_CLs_index_table_gpu;
-  uint32_t *_g_c_table; 
-  uint32_t *_position_table; 
-  uint32_t *_gpu_sync;
-  uint32_t *_num_needed_blocks_gpu; 
-
-  void _MA_simu_preparation();
-    void _construct_num_CLs_weight_tables();
-    void _update_st_ld_CLs_per_level();
-      void _needed_st_ld_CLs_per_level_per_block(std::vector<bool> &POs_in_this_CL);
-      void _st_ld_CLs_per_level(std::vector<bool> &POs_in_this_CL);
-        void _sorting(const int l, 
-                      const std::set<int> &needed_CLs_per_level_l, 
-                      const std::set<int> &cache_set,
-                      std::set<int> &erase_set, std::set<int> &insert_set);
-        void _update_st(const int l, std::vector<bool> &POs_in_this_CL,
-                      const std::set<int> &erase_set, 
-                      const std::vector<int> &cache_index); 
-        void _update_ld(const int l, 
-                      const std::set<int> &insert_set, 
-                      const std::set<int> &erase_set, 
-                      std::vector<int> &cache_index); 
-        void _update_cache_set(std::set<int> &erase_set, 
-                                std::set<int> &insert_set,
-                                std::set<int> &cache_set);
-
-        
-                              
 
   // free
   void _free() {
@@ -290,13 +228,6 @@ private:
     cudaFree(_fault_gate_idx_gpu);
     cudaFree(_fault_SA_fault_val_gpu);
     cudaFree(_pi_gate_po_output_res_gpu);
-    cudaFree(_st_ld_CLIdxs_gpu);
-    cudaFree(_st_ld_positi_gpu);
-    cudaFree(_st_ld_CLs_index_table_gpu);
-    cudaFree(_g_c_table);
-    cudaFree(_position_table);
-    cudaFree(_num_needed_blocks_gpu);
-    cudaFree(_gpu_sync);    
   }
 
   // --------------------------------------------------------------------------

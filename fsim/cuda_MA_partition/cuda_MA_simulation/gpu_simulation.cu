@@ -75,17 +75,6 @@ void GALPS_MA_GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
         ((_num_pattern / (UINT32T_BITS * (rd + 1))))
             ? (UINT32T_BITS)
             : (_num_pattern % UINT32T_BITS);
-            // if (rd==0) {
-              // printf("rd = %lu, _num_rounds= %lu %d\n", rd, _num_rounds, _total_num_levels);
-              // if (_sum_pi_gates_pos <= 409184) {
-              //   printf("PASS: #gates = %d\n", _sum_pi_gates_pos);
-              // } else {
-              //   printf("NO: #gates = %d\n", _sum_pi_gates_pos);
-              // }
-              // for (int i = 0; i < _total_num_levels; i++) {
-              //   printf("level %d: %d\n", i, _numGates_per_level[i]);
-              // }
-            // }
     _run_cones_good_case_DSP_gpu(_total_num_levels, 
                                   _numGates_per_level, 
                                   _numGates_per_level_gpu,
@@ -137,8 +126,6 @@ void GALPS_MA_GPUSimulator::_run_cones_good_case_DSP_gpu(const int _total_num_le
                                                         const size_t bits,
                                                         const size_t rd, 
                                                         uint32_t *_pi_gate_po_output_res_gpu) {
-  // printf("Getting inside _run_cones_good_case_DSP_gpu\n");
-
   const size_t fault_num = 0; const size_t bad_case = 0;
   int num_blocks, num_threads;
   int num_accumGates = 0;
@@ -279,22 +266,6 @@ void GALPS_MA_GPUSimulator::_run_cones_good_case_MA_gpu(const int _total_num_lev
 #ifdef GPU_PART_DEBUG_PRINT_SIMULATION
   cudaDeviceSynchronize();
 #endif  
-
-  // cudaDeviceSynchronize();
-  // std::vector<int> bibicheck_cpu; 
-  // bibicheck_cpu.resize(_sum_pi_gates_pos, 0);
-  // cudaMemcpyAsync(bibicheck_cpu.data(), bibicheck, 
-  //                 _sum_pi_gates_pos*sizeof(int), cudaMemcpyDeviceToHost);
-  // cudaCheckErrors("CUDA: bibicheck - cudaMemcpyAsync - Failure");  
-  // cudaDeviceSynchronize();
-  // for (int i = 0 ; i < _sum_pi_gates_pos; i++) {
-  //   if (bibicheck_cpu[i] != 1) {
-  //     printf("bibicheck_cpu[%d] = %d\n", i, bibicheck_cpu[i]);
-
-  //   }
-  // }
-
-
 }
 
 

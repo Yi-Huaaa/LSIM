@@ -45,15 +45,6 @@
         } \
     } while (0)
 
-
-inline int getCLIdx(int gateIdx) {
-  return gateIdx/_NUM_GATES_PER_CL;
-}
-
-inline int ceiling(int a, int b) {
-  return (a+b-1)/b; 
-}
-
 // Read files
 void CUDAMAPartitioner::read(const std::string &ckt_path, const std::string &flst_path, const std::string &ptn_path) {
   // printf("Get inside CUDAMAPartitioner::read first\n");
@@ -73,18 +64,9 @@ void CUDAMAPartitioner::read(const std::string &ckt_path, const std::string &fls
 }
 
 void CUDAMAPartitioner::read(std::istream &ckt, std::istream &flst, std::istream &ptn) {
-  // Read gate 
   ckt >> _num_PIs >> _num_POs >> _num_inner_gates >> _num_wires; 
   _sum_pi_gates_pos = _num_PIs + _num_inner_gates + _num_POs;
-  
-  _read_graph(ckt);
-  _read_fault(flst);
-  _read_pattern(ptn);
-
-  // auto start = std::chrono::steady_clock::now();
-  // auto end = std::chrono::steady_clock::now();
-  // std::chrono::duration<double> duration_GPU_partition = end - start;
-  // std::cout << "duration_GPU_partition: " << _round_to((duration_GPU_partition.count())*1000, 0.001) << "\n";
+  _read_graph(ckt); _read_fault(flst); _read_pattern(ptn);
 }
 
 void CUDAMAPartitioner::_read_graph(std::istream &ckt) {
@@ -160,8 +142,6 @@ void CUDAMAPartitioner::_read_graph(std::istream &ckt) {
     _numGates_per_level[level]++;
   }
 
-  // _print_levelized();
-
   // Construct _adj and _invAdj
   _adj = (int*)malloc(_szOfAdj*sizeof(int));
   _adj_index_table = (int*)malloc(2*_sum_pi_gates_pos*sizeof(int));
@@ -175,33 +155,23 @@ void CUDAMAPartitioner::_read_graph(std::istream &ckt) {
   
   int accum = 0;
   for (size_t fromGate = 0; fromGate < newIdxAdj.size(); fromGate++) {
-    // Update _adj_index_table
     _adj_index_table[2*fromGate+0] = accum;
 
     for (size_t toGate = 0; toGate < newIdxAdj[fromGate].size(); toGate++) {
       int toGateIdx = newIdxAdj[fromGate][toGate];
-      
-      // Update _adj
-      _adj[accum] = toGateIdx;
-      accum++;
+      _adj[accum] = toGateIdx; accum++;
     }
-    // Update _adj_index_table
     _adj_index_table[2*fromGate+1] = accum;
   }
 
   accum = 0;
   for (size_t toGate = 0; toGate < newIdxInvAdj.size(); toGate++) {
-    // Update _invAdj_index_table
     _invAdj_index_table[2*toGate+0] = accum;
 
     for (size_t fromGate = 0; fromGate < newIdxInvAdj[toGate].size(); fromGate++) {
       int toGateIdx = newIdxInvAdj[toGate][fromGate];
-      
-      // Update _invAdj
-      _invAdj[accum] = toGateIdx;
-      accum++;
+      _invAdj[accum] = toGateIdx; accum++;
     }
-    // Update _invAdj_index_table
     _invAdj_index_table[2*toGate+1] = accum;
   }
 
@@ -221,13 +191,6 @@ void CUDAMAPartitioner::_read_graph(std::istream &ckt) {
     int newGateIdx = _newIndex[i];
     _gate_type[newGateIdx] = static_cast<GateType>(type);
   }
-
-  // _print_read_graph();
-  
-#ifdef MA_PAR
-  // printf("_max_level = %d\n", _max_level);
-  _MA_simu_preparation();
-#endif 
 }
 
 void CUDAMAPartitioner::_read_fault(std::istream &flst) {
@@ -261,550 +224,6 @@ void CUDAMAPartitioner::_read_pattern(std::istream &ptn) {
     }
   }
 }
-
-void CUDAMAPartitioner::_construct_num_CLs_weight_tables() {
-  // prepare _num_CLs
-  _num_CLs = (_sum_pi_gates_pos + _NUM_GATES_PER_CL - 1)/_NUM_GATES_PER_CL;
-
-  // prepare _weight_table
-  _weight_table.resize(_num_CLs*_total_num_levels, 0);
-  
-  // init _weight_table
-  for (int gateIdx = 0; gateIdx < _sum_pi_gates_pos; gateIdx++) {
-    int num_output_gates = _adj_index_table[2*gateIdx+1] - _adj_index_table[2*gateIdx+0];
-    // printf("gateIdx = %d, num_output_gates = %d\n", gateIdx, num_output_gates);
-    int which_CL = getCLIdx(gateIdx); 
-    _weight_table[which_CL] += num_output_gates;
-  }
-
-  // update _weight_table
-  int fin_level = 0, acc_g = 0;
-  bool level_update = false; 
-  // TODO: this for loop can be run in parallel 
-  for (int gateIdx = 0; gateIdx < _sum_pi_gates_pos; gateIdx++) {
-    // printf("gateIdx = %d\n", gateIdx);
-    // reduce 
-    for (int fmGate = _invAdj_index_table[2*gateIdx+0]; fmGate < _invAdj_index_table[2*gateIdx+1]; fmGate++) {
-      int fmGateIdx = _invAdj[fmGate];
-      int fmGateCLIdx = getCLIdx(fmGateIdx); 
-      _weight_table[fin_level*_num_CLs+fmGateCLIdx]--;
-      // printf("\t\tfmGateIdx = %d, fmGateCLIdx = %d (limit: %d), _weight_table[%d] = %d\n", 
-      //         fmGateIdx, fmGateCLIdx, _num_CLs, 
-      //         fin_level*_num_CLs+fmGateCLIdx, _weight_table[fin_level*_num_CLs+fmGateCLIdx]);
-    }
-    acc_g++; // accumulate one finished gate in this fin_level
-
-    level_update = ((acc_g == _numGates_per_level[fin_level]) && (fin_level < (_total_num_levels-1)))
-                  ? (true) : (false);
-    if (level_update) {
-      // printf("level_update!\n");
-      fin_level++; // update fin_level 
-      for (int i = 0; i < _num_CLs; i++) { // init the weight table for the next level 
-        // printf("\t\tupdate _weight_table[%d]\n", fin_level*_num_CLs+i);
-        _weight_table[fin_level*_num_CLs+i] = _weight_table[(fin_level-1)*_num_CLs+i];
-      }
-      level_update = false; // re-init level_update back to false
-      acc_g = 0; // re-init back to zero
-      // printf("\n\n");
-    }
-  }
-
-  // // print weight table
-  // printf("\n\n_sum_pi_gates_pos = %d, _weight_table = [\n", _sum_pi_gates_pos);
-  // for (int l = 0; l < _total_num_levels; l++) {
-  //   printf("\tlevel_%d: ", l);
-  //   for (int i = l*_num_CLs; i < (l+1)*_num_CLs; i++) {
-  //     printf("%d, ", _weight_table[i]);
-  //   }
-  //   printf("\n");
-  // }
-  // printf("]\n");
-
-  // // test the correctness of weight table 
-  // bool all_zeros = true; 
-  // for (int l = _total_num_levels-1; l < _total_num_levels; l++) {
-  //   for (int i = l*_num_CLs; i < (l+1)*_num_CLs; i++) {
-  //     all_zeros = (_weight_table[i] == 0) ? (true) : (false);
-  //   }
-  // }
-  // if (!all_zeros) {
-  //   printf("QQ FAIL ALL ZERO!!!\n");
-  // } else {
-  //   printf("PASS ALL ZERO!!!\n");
-  // }
-}
-
-void CUDAMAPartitioner::_sorting(const int l, 
-                                const std::set<int> &needed_CLs_per_level_l, 
-                                const std::set<int> &cache_set,
-                                std::set<int> &erase_set, std::set<int> &insert_set) {
-  // step 0. 取聯集                                
-  std::set<int> unionSet;
-  // printf("needed_CLs_per_level_l.size() = %lu %lu\n", needed_CLs_per_level_l.size(), cache_set.size());
-  // std::cout << "Iterating needed_CLs_per_level_l: ";
-  // for (const int &val : needed_CLs_per_level_l) {
-  //     std::cout << val << " ";
-  // }
-  // std::cout << std::endl;
-    
-  // std::cout << "Iterating cache_set: ";
-  // for (const int &val : cache_set) {
-  //     std::cout << val << " ";
-  // }
-  // std::cout << std::endl;
-  
-  std::set_union(needed_CLs_per_level_l.begin(), needed_CLs_per_level_l.end(),
-                cache_set.begin(), cache_set.end(),
-                std::inserter(unionSet, unionSet.begin()));
-
-  // step 1: 構建 (值, index) pair
-  std::vector<std::pair<int, int>> indexed_cache;
-  indexed_cache.reserve(unionSet.size());  
-
-  // printf("_weight_table[%d] = [", l); 
-  // for (int i = 0; i < 256; i++) {
-  //   printf("%d, ", _weight_table[l*_num_CLs+i]); 
-  // }
-  // printf("]\n"); 
-
-  for (const int CLIdx : unionSet) {
-    int CL_weight = _weight_table[l*_num_CLs+CLIdx];
-    indexed_cache.emplace_back(CL_weight, CLIdx);
-    // printf("push in CLIdx = %d, CL_weight = %d\n", CLIdx, CL_weight);
-  }  
-
-  // // Print each pair (value, index)
-  // printf("\tindexed_cache: ");
-  // for (const auto& p : indexed_cache) {
-  //   std::cout << "(" << p.first << ", " << p.second << ") ";
-  // }
-  // std::cout << std::endl << std::endl;
-
-  // step 2. sort from large to small (only push in those without conflict)
-  std::sort(
-    indexed_cache.begin(), indexed_cache.end(),
-    [](const auto &lhs, const auto &rhs) {
-      return lhs.first > rhs.first; // Sort based on the first element of the pair
-    });
-  
-  // check for gc table conflict
-  std::vector<int> accum; accum.resize(8192, 0);
-  for (size_t i = 0; i < indexed_cache.size(); i++) {
-    const int CLIdx_mod_8192 = (indexed_cache[i].second)&8191; // mod 8192
-    accum[CLIdx_mod_8192]++;
-  }
-
-  assert(indexed_cache.size() >= _NUM_CLS_PER_BLOCK && "assert(indexed_cache.size() >= _NUM_CLS_PER_BLOCK");
-  std::set<int> remin_set;
-  for (size_t i = 0; i < indexed_cache.size(); i++) { // 留下 256 個需要被留下的
-    const int CLIdx_mod_8192 = (indexed_cache[i].second)&8191; // mod 8192
-    if ((remin_set.size() < _NUM_CLS_PER_BLOCK) && (accum[CLIdx_mod_8192] == 1)) {
-      remin_set.insert(indexed_cache[i].second);
-    } 
-    if (remin_set.size() == _NUM_CLS_PER_BLOCK) {
-      // printf("\tEarly break, remin_set.size() = %lu (%lu), level = %d\n", remin_set.size(), i, l);
-      break;
-    }
-  }
-
-  // // Print each pair (value, index)
-  // printf("\tindexed_cache: ");
-  // for (const auto& p : indexed_cache) {
-  //   std::cout << "(" << p.first << ", " << p.second << ") ";
-  // }
-  // std::cout << std::endl << std::endl;
-  
-  // printf("\tremin_set: ");
-  // for (const int& p : remin_set) {
-  //   std::cout << p << ", ";
-  // }
-  // std::cout << std::endl << std::endl;
-
-  // step 3. 取兩種差集
-  // Compute A - B (elements in a but not in b)
-  std::set_difference(cache_set.begin(), cache_set.end(), remin_set.begin(), remin_set.end(),
-                      std::inserter(erase_set, erase_set.begin()));
-
-  // Compute B - A (elements in b but not in a)
-  std::set_difference(remin_set.begin(), remin_set.end(), cache_set.begin(), cache_set.end(),
-                      std::inserter(insert_set, insert_set.begin()));
-  // make the size of erase_set equals to insert_set
-  while (erase_set.size() != insert_set.size()) {
-    erase_set.erase(erase_set.begin());
-  }
-  // if (erase_set.size() != insert_set.size()) {
-  //   printf("erase_set.size() = %lu insert_set.size() = %lu\n", erase_set.size(), insert_set.size());
-  //   exit(1);
-  // }
-
-  // printf("\terase_set (sz = %lu, l = %d): ", erase_set.size(), l);
-  // for (const int& p : erase_set) {
-  //   std::cout << p << ", ";
-  // }
-  // std::cout << std::endl << std::endl;
-
-  // printf("\tinsert_set (sz = %lu, l = %d): ", insert_set.size(), l);
-  // for (const int& p : insert_set) {
-  //   std::cout << p << ", ";
-  // }
-  // std::cout << std::endl << std::endl;
-  
-  // The following code only used for check the correctness 
-  // 檢查：有重複的 gc idx 肯定沒有被 LD/ST -> 該 gc table 一定只能是 false, 必定回到 global memory 拿資料
-  // // TODO: 這個再測時間的時候要拿掉
-  // accum.clear(); accum.resize(8192, 0);
-  // for (const int CLIdx : insert_set) {
-  //   const int CLIdx_mod_8192 = CLIdx&8191; // mod 8192
-  //   accum[CLIdx_mod_8192]++;
-  // }
-  // for (const int a : accum) {
-  //   if (a > 1) {
-  //     printf("ERROR, a = %d\n", a);
-  //     exit(1);
-  //   }
-  // }
-}
-
-void CUDAMAPartitioner::_update_st(const int l, std::vector<bool> &POs_in_this_CL,
-                                  const std::set<int> &erase_set, 
-                                  const std::vector<int> &cache_index)  {
-  _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size()); // starts 
-
-  // weight table != 0 才要寫回去
-  for (const int& CLIdx : erase_set) {
-    auto it = std::find(cache_index.begin(), cache_index.end(), CLIdx);
-    int posIdx = (std::distance(cache_index.begin(), it)); // 要被踢掉的 CLIdx 在 cache_index 中的位置
-    assert(posIdx < cache_index.size() && "posIdx < cache_index.size()"); // 保險起見放的而已
-    // if (it == cache_index.end()) {
-    //   printf("\t\tERROR: it == cache_index.end() (CLIdx = %d, posIdx = %d)\n", CLIdx, posIdx);
-    //   exit(1);
-    // }
-
-    if ((_weight_table[l*_num_CLs+CLIdx] == 0) && (POs_in_this_CL[CLIdx] == false)) {
-      // update _st_ld_positi
-      _st_ld_positi.push_back(posIdx);
-      // update _st_ld_CLIdxs
-      _st_ld_CLIdxs.push_back(-1);       
-      // printf("\t\t(X) No need to WB posIdx = %d, CLIdx = %d\n", posIdx, CLIdx);
-    } else {
-      // update _st_ld_positi
-      _st_ld_positi.push_back(posIdx);
-      // update _st_ld_CLIdxs
-      _st_ld_CLIdxs.push_back(CLIdx); 
-      // printf("\t\t(V) Need to WB posIdx = %d, CLIdx = %d\n", posIdx, CLIdx);
-    }
-  }
-  _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size()); // ends
-}
-
-void CUDAMAPartitioner::_update_ld(const int l, 
-                                  const std::set<int> &insert_set, 
-                                  const std::set<int> &erase_set, 
-                                  std::vector<int> &cache_index) {
-  _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size()); // starts 
-    const int starts = _st_ld_CLs_index_table[4*l+0]; int i = 0;
-    for (const int &newCLIdx : insert_set) {
-      int posIdx = _st_ld_positi[starts+i]; i++; 
-      // update _st_ld_positi
-      _st_ld_positi.push_back(posIdx);
-      // update _st_ld_CLIdxs
-      _st_ld_CLIdxs.push_back(newCLIdx); 
-      // printf("\t\tposIdx = %d, newCLIdx = %d\n", posIdx, newCLIdx);
-      // update cache_index
-      cache_index[posIdx] = newCLIdx;
-    }
-
-  _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size()); // ends
-}
-
-void CUDAMAPartitioner::_update_cache_set(std::set<int> &erase_set, 
-                                        std::set<int> &insert_set, 
-                                        std::set<int> &cache_set) {
-  for (const int&clIdx : erase_set) {
-    cache_set.erase(clIdx);
-  }
-  for (const int&clIdx : insert_set) {
-    cache_set.insert(clIdx);
-  }
-}
-
-void CUDAMAPartitioner::_st_ld_CLs_per_level(std::vector<bool> &POs_in_this_CL) {
-  std::set<int> cache_set; // 紀錄 cahce 當下有個 CLs，用 sets 取聯集和差集比較快
-  std::vector<int> cache_index; 
-  
-  // 一開始先把 256 條都放進去
-  for (int i = 0; i < _NUM_CLS_PER_BLOCK; i++) {
-    cache_set.insert(i);
-    cache_index.push_back(i); 
-  }
-
-  int diffSetSz = 0;
-  int level = 0;
-  while (diffSetSz == 0 && level < _total_num_levels) {
-    std::set<int> diffSet;
-    std::set_difference(_needed_CLs_all_blocks[level].begin(), _needed_CLs_all_blocks[level].end(),
-                        cache_set.begin(), cache_set.end(),
-                        std::inserter(diffSet, diffSet.begin()));
-    diffSetSz = diffSet.size();
-    // printf("\tlevel %d PASS, diffSet.size() = %lu (_needed_CLs_all_blocks[%d][%d].size() = %lu)\n", 
-    //       level, diffSet.size(), b, level, _needed_CLs_all_blocks[b][level].size());
-    if (diffSetSz == 0) {
-      level++;
-    }
-  } 
-  // printf("level = %d\n", level);
-
-  bool all_in_one_cache = (level == _total_num_levels);
-  if (all_in_one_cache) { // 所有東西都能被塞進 cache line 裡面
-    // printf("level = %d, _total_num_levels = %d, _num_CLs = %d\n", level, _total_num_levels, _num_CLs);
-    
-    // init _st_ld_CLs_index_table: level 0
-    // st: 
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    // ld: 
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    
-    int CLs = (_num_CLs < _NUM_CLS_PER_BLOCK) ? (_num_CLs) : (_NUM_CLS_PER_BLOCK);
-    for (int i = 0; i < CLs; i++) {
-      _st_ld_CLIdxs.push_back(i);
-      _st_ld_positi.push_back(i);
-    }
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-
-    for (int l = 1; l < level; l++) {
-      // st
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-      // ld
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());    
-    }
-
-    // last level + 1:  need to WB
-    // st
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    for (int i = 0; i < CLs; i++) {
-      if (POs_in_this_CL[i]) {
-        _st_ld_CLIdxs.push_back(i);
-        _st_ld_positi.push_back(i);        
-      }
-    }
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    // ld
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());  
-  } else { // 不是所有東西都能被塞進 cache line 裡面
-    // init _st_ld_CLs_index_table: level 0
-    // st: 
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    // ld: 
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    for (int i = 0; i < _NUM_CLS_PER_BLOCK; i++) {
-      _st_ld_CLIdxs.push_back(i);
-      _st_ld_positi.push_back(i);
-    }
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-
-    for (int l = 1; l < level; l++) {
-      // st
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-      // ld
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-      _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());    
-    }
-
-    // printf("!?level = %d\n", level);
-    for (int l = level; l < _total_num_levels; l++) {
-      // printf("\tlevel %d, with cache_set.size() = %lu\n", l, cache_set.size());
-      std::set<int> erase_set;
-      std::set<int> insert_set;
-      _sorting(l, _needed_CLs_all_blocks[l], cache_set, erase_set, insert_set);
-      // printf("\tst-st-st-st-st-st-st-st-st-st-st-st-st-st-st-st-st-st-st\n");
-      _update_st(l, POs_in_this_CL, erase_set, cache_index);
-      // printf("\tld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld-ld\n");
-      _update_ld(l, insert_set, erase_set, cache_index);
-      _update_cache_set(erase_set, insert_set, cache_set);
-      // printf("After _update_cache_set: cache_set.size() = %lu\n", cache_set.size());
-      // assert(cache_set.size() == 256 && "assert(cache_set.size() == 256");
-      if (cache_set.size() != 256) {
-        printf("cache_set.size()!=256\n");
-        exit(1);
-      }
-      // printf("\n");
-    }
-
-    // last level + 1:  need to WB
-    // st
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    for (const int i:_needed_CLs_all_blocks[_total_num_levels-1]) {
-      if (POs_in_this_CL[i]) {
-        _st_ld_CLIdxs.push_back(i);
-        _st_ld_positi.push_back(i);
-      }
-    }
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    // ld
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());
-    _st_ld_CLs_index_table.push_back(_st_ld_CLIdxs.size());        
-    // printf("_st_ld_CLs_index_table.size() = %lu\n", _st_ld_CLs_index_table.size());
-  }
-
-
-  // for (int l = 0; l < _total_num_levels; l++) {
-  //   printf("l = %d, _numGates_per_level[%d] = %d\n", l, l, _numGates_per_level[l]);
-  // }
-  // // print
-  // printf("_total_num_levels = %d\n", _total_num_levels);
-  // printf("_st_ld_CLIdxs (block = %d, _total_num_levels = %d) = [\n", _total_num_levels);
-  // for (size_t i = 0; i < _st_ld_CLs_index_table.size()/(4); i++) {
-  //   // st
-  //   printf("\tlevel %lu st (sz = %d): ", i, _st_ld_CLs_index_table[4*i+1]-_st_ld_CLs_index_table[4*i+0]);
-  //   for (int j = _st_ld_CLs_index_table[4*i+0]; j < _st_ld_CLs_index_table[4*i+1]; j++) {
-  //     if (_st_ld_CLIdxs[j] != -1)
-  //       printf("(pos, CLIdx) = (%d, %d), ", _st_ld_positi[j], _st_ld_CLIdxs[j]);
-  //   }
-  //   printf("\n");
-  //   // ld 
-  //   printf("\tlevel %lu ld (sz = %d): ", i, _st_ld_CLs_index_table[4*i+3]-_st_ld_CLs_index_table[4*i+2]);
-  //   for (int j = _st_ld_CLs_index_table[4*i+2]; j < _st_ld_CLs_index_table[4*i+3]; j++) {
-  //     printf("(pos, CLIdx) = (%d, %d), ", _st_ld_positi[j], _st_ld_CLIdxs[j]);
-  //   }
-  //   printf("\n");
-  // }
-  // printf("]\n");    
-}
-
-void CUDAMAPartitioner::_needed_st_ld_CLs_per_level_per_block(std::vector<bool> &POs_in_this_CL) {
-  // Settings for limitation from size of shared memory 
-  const int limit_num_blocks = (_num_threads == 1024) ? (48) : (48*2);
-  const int maxGates = limit_num_blocks*_num_threads;
-  // printf("_num_threads = %d, limit_num_blocks = %d, maxGates = %d\n", _num_threads, limit_num_blocks, maxGates);
-  // find the max_num_blocks 
-  // int max_l = 0, 
-  int max_num_blocks = 0;
-  for (int l = 0; l < _total_num_levels; l++) {
-    int tmp = (_numGates_per_level[l] + _num_threads - 1)/_num_threads; 
-    if (tmp > max_num_blocks) {
-      // max_l = l; 
-      max_num_blocks = tmp; 
-    }
-  }
-  // printf("max_l = %d max_num_blocks = %d, _numGates_per_level[%d] = %d\n", 
-  //         max_l, max_num_blocks, max_l, _numGates_per_level[max_l]);
-  _used_num_blocks = (max_num_blocks < limit_num_blocks) 
-                        ? (max_num_blocks) 
-                        : (limit_num_blocks);
-  _needed_CLs_all_blocks.resize(_total_num_levels);
-
-  int acc_g = 0;
-  for (int l = 0; l < _total_num_levels; l++) {
-    const int rounds = ceiling(_numGates_per_level[l], maxGates);
-    for (int g = 0; g < _numGates_per_level[l]; g++) {
-      int gateIdx = acc_g+g;
-      int which_CL = getCLIdx(gateIdx);
-      // handled by which block Idx
-      _needed_CLs_all_blocks[l].insert(which_CL);
-      for (int fmGate = _invAdj_index_table[2*gateIdx+0]; 
-               fmGate < _invAdj_index_table[2*gateIdx+1]; 
-               fmGate++) {
-        int fmGateIdx = _invAdj[fmGate];
-        which_CL = getCLIdx(fmGateIdx);
-        _needed_CLs_all_blocks[l].insert(which_CL);
-      }
-    }
-    acc_g += _numGates_per_level[l];
-  } 
-
-  // // printf("blocks %lu\n", b);
-  // for (size_t l = 0; l < _needed_CLs_all_blocks.size(); l++) {
-  //   if (_needed_CLs_all_blocks[l].size() != 0) {
-  //     printf("\tlevel %lu numCLs = %lu, ", l, _needed_CLs_all_blocks[l].size());
-  //     // for (const int &val : _needed_CLs_all_blocks[l]) {
-  //     //   std::cout << val << " ";
-  //     // }
-  //     std::cout << std::endl;
-  //   }
-  // }
-
-  POs_in_this_CL.resize(_num_CLs, false);
-  for (int i = 0; i < _sum_pi_gates_pos; i++) {
-    if (_gate_type[i] == GateType::PO) {
-      int which_CL = getCLIdx(i);
-      POs_in_this_CL[which_CL] = true; 
-      // printf("PO Idx = %d\n", i);
-    }
-  }
-
-  // for (size_t i = 0; i < POs_in_this_CL.size(); i++) {
-  //   if (POs_in_this_CL[i]) {
-  //     printf("POs_in_this_CL[%lu] = true\n", i);
-  //   }
-  // }  
-
-  // Judge return level per block
-  std::vector<int> ret_level;
-  ret_level.resize(_used_num_blocks); 
-  for (int b = _used_num_blocks-1; b > -1; b--) {
-    int ret_l = _total_num_levels; 
-    for (int l = (_total_num_levels-1); l > 0; l--) {
-      if (_numGates_per_level[l] > _num_threads*b) {
-        ret_l = l+1; 
-        break;
-      }
-    }
-    ret_level[b] = (b == (_used_num_blocks - 1)) 
-                  ? ret_l 
-                  : ((ret_l > ret_level[b + 1]) 
-                    ? ret_l 
-                    : ret_level[b + 1]);
-  }
-
-  // for (int b = 0; b < _used_num_blocks; b++) {
-  //   printf("block %d, ret_level[%d] = %d\n", b, b, ret_level[b]);
-  // }
-  // printf("_total_num_levels = %d\n", _total_num_levels);
-  
-  // for (int l = 0; l < _total_num_levels; l++) {
-  //   printf("level = %d, nG = %d, needs #blocks = %d\n", 
-  //           l, _numGates_per_level[l], (_numGates_per_level[l]+512-1)/512);
-  // }
-
-  _num_needed_blocks.resize(_total_num_levels, 0);
-  for (size_t b = 0; b < ret_level.size(); b++) {
-    for (int l = 0; l < ret_level[b]; l++) {
-      _num_needed_blocks[l]++;
-    }
-  }
-  size_t s = _num_needed_blocks.size();
-  _num_needed_blocks.push_back(_num_needed_blocks[s-1]);
-
-  // for (size_t l = 0; l < _num_needed_blocks.size(); l++) {
-  //   printf("_num_needed_blocks[%lu] = %d\n", l, _num_needed_blocks[l]);
-  // }
-
-  // printf("_used_num_blocks = %d\n", _used_num_blocks);
-  // printf("_total_num_levels = %d, _num_PIs = %d, _num_inner_gates = %d, _num_POs = %d, _sum_pi_gates_pos = %d\n", 
-  //       _total_num_levels, _num_PIs, _num_inner_gates, _num_POs, _sum_pi_gates_pos);
-}
-
-
-void CUDAMAPartitioner::_update_st_ld_CLs_per_level() {
-  std::vector<bool> POs_in_this_CL;
-  _needed_st_ld_CLs_per_level_per_block(POs_in_this_CL);
-  
-  // 這裡要確定每一層需要重新 st/ld 哪些 CLs
-  // for each level: 1. st start, 2. st end, 3. ld start, 4. ld end
-  _st_ld_CLs_per_level(POs_in_this_CL); 
-}
-
-void CUDAMAPartitioner::_MA_simu_preparation() {
-  _construct_num_CLs_weight_tables();
-  _update_st_ld_CLs_per_level();
-}
-
 
 
 
@@ -840,32 +259,6 @@ void CUDAMAPartitioner::_topological_sort(std::vector<std::vector<int>> &adj,
   }
 }
 
-
-void CUDAMAPartitioner::_sampling() {
-  // construct bucket
-  std::vector<std::vector<int>> level_to_gates(_total_num_levels);
-  for (int gateIdx = 0; gateIdx < _sum_pi_gates_pos; gateIdx++) {
-    int l = _level_of_gates[gateIdx];
-    level_to_gates[l].push_back(gateIdx);
-  }
-
-  // random shuffle order
-  std::random_device rd;
-  std::mt19937 g(rd());
-  
-  for (int l = 1; l < _total_num_levels; l++) {
-    std::shuffle(level_to_gates[l].begin(), level_to_gates[l].end(), g);
-  }
-
-  // 重新建構 order
-  _sampled_order.clear();
-  for (int l = 0; l < _total_num_levels; l++) {
-    for (int gateIdx : level_to_gates[l]) {
-      _sampled_order.push_back(gateIdx);
-    }
-  }
-}
-
 void CUDAMAPartitioner::_levelized(std::vector<std::vector<int>> &adj, 
                                    std::vector<std::vector<int>> &invAdj) {
   // Run topological sort
@@ -894,13 +287,6 @@ void CUDAMAPartitioner::_levelized(std::vector<std::vector<int>> &adj,
     }
   } 
   _total_num_levels = _max_level + 1;
-
-
-#ifdef SAMPLING
-  // Sampling....
-  _sampling(); 
-  order = _sampled_order;
-#endif 
 
   // re-index based on the results of topological sort
   _newIndex.resize(_sum_pi_gates_pos);
@@ -990,30 +376,6 @@ void CUDAMAPartitioner::_move_faults___h2d() {
 #endif
 }
 
-void CUDAMAPartitioner::_move_st_ld____h2d() {
-  cudaMalloc((void**)&_st_ld_CLIdxs_gpu, _st_ld_CLIdxs.size()*sizeof(int));
-  cudaMalloc((void**)&_st_ld_positi_gpu, _st_ld_positi.size()*sizeof(int));
-  cudaMalloc((void**)&_st_ld_CLs_index_table_gpu, _st_ld_CLs_index_table.size()*sizeof(int));
-  cudaMalloc((void**)&_gpu_sync, 4*sizeof(uint32_t));
-  cudaMalloc((void**)&_num_needed_blocks_gpu, _num_needed_blocks.size()*sizeof(uint32_t));
-  // cudaMalloc((void**)&_g_c_table, ((_num_CLs + 32 - 1)/32)*sizeof(uint32_t));
-  // cudaMalloc((void**)&_position_table, ((_num_CLs + 8 - 1)/8)*sizeof(uint32_t));
-  // printf("_num_CLs = %d, _g_c_table size = %d, _position_table size = %d\n", _num_CLs, ((_num_CLs + 32 - 1)/32), (_num_CLs + 8 - 1)/8);
-  cudaCheckErrors("CUDA: Asking _move_st_ld____h2d cudaMalloc - Failure");
-
-  cudaMemcpyAsync(_st_ld_CLIdxs_gpu, _st_ld_CLIdxs.data(), 
-                  _st_ld_CLIdxs.size()*sizeof(int), cudaMemcpyHostToDevice); 
-  cudaMemcpyAsync(_st_ld_positi_gpu, _st_ld_positi.data(), 
-                  _st_ld_positi.size()*sizeof(int), cudaMemcpyHostToDevice); 
-  cudaMemcpyAsync(_st_ld_CLs_index_table_gpu, _st_ld_CLs_index_table.data(), 
-                  _st_ld_CLs_index_table.size()*sizeof(int), cudaMemcpyHostToDevice); 
-  cudaMemset(_gpu_sync, 0, 4*sizeof(uint32_t));
-  cudaMemcpyAsync(_num_needed_blocks_gpu, _num_needed_blocks.data(), 
-                  _num_needed_blocks.size()*sizeof(uint32_t), cudaMemcpyHostToDevice);   
-  // printf("_num_CLs = %d\n", _num_CLs);
-  cudaCheckErrors("CUDA: Asking _move_st_ld____h2d cudaMemcpyAsync - Failure");
-}
-
 void CUDAMAPartitioner::prepare_gpu_simulation() {
   auto start = std::chrono::steady_clock::now();
   
@@ -1035,10 +397,6 @@ void CUDAMAPartitioner::prepare_gpu_simulation() {
   _move_GateType_h2d();
   _move_patterns_h2d();
   _move_faults___h2d();
-
-#ifdef MA_PAR
-  _move_st_ld____h2d();
-#endif 
 
   auto end = std::chrono::steady_clock::now();
   std::chrono::duration<double> duration_prepare = end - start;
@@ -1064,33 +422,6 @@ void CUDAMAPartitioner::run(const size_t num_threads, const size_t NUM_SIMULATIO
                                           _invAdj_index_table_gpu,
                                           _patterns, 
                                           NUM_SIMULATION_RDS);
-  cudaDeviceSynchronize();
-}
-
-void CUDAMAPartitioner::run_MA(const size_t num_threads, const size_t NUM_SIMULATION_RDS) {  
-  GALPS_MA_GPUSimulator gpuSimulator;
-  gpuSimulator.run_gpu_simulator_MA_gpu(_num_PIs, _num_inner_gates, _num_POs, 
-                                        _sum_pi_gates_pos, 
-                                        _num_pattern, _num_rounds, _num_fault,
-                                        _pi_gate_po_gate_type_gpu, 
-                                        _patterns_gpu,
-                                        _fault_gate_idx_gpu,
-                                        _fault_SA_fault_val_gpu,
-                                        _pi_gate_po_output_res_gpu,
-                                        _numGates_per_level,
-                                        _numGates_per_level_gpu,
-                                        _total_num_levels,
-                                        _invAdj_gpu,
-                                        _invAdj_index_table_gpu,
-                                        _patterns, 
-                                        NUM_SIMULATION_RDS, 
-                                        _st_ld_CLIdxs_gpu, 
-                                        _st_ld_positi_gpu, 
-                                        _st_ld_CLs_index_table_gpu,
-                                        _gpu_sync,
-                                        _used_num_blocks,
-                                        _num_threads,
-                                        _num_needed_blocks_gpu);
   cudaDeviceSynchronize();
 }
 
