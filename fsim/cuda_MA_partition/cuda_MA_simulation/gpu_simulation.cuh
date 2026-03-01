@@ -143,9 +143,7 @@ __global__ void _print_simulation_results(const uint32_t *_pi_gate_po_output_res
 // Forward declaration of CUDAMAPartitioner
 class CUDAMAPartitioner;
 
-class GALPS_MA_GPUSimulator {
-  // const uint32_t UINT32T_BITS = std::numeric_limits<uint32_t>::digits;
-
+class GPUSimulator {
   friend class CUDAMAPartitioner;
 
 public:
@@ -194,66 +192,6 @@ public:
     } // NUM_SIMULATION_RDS
   }
 
-  void run_gpu_simulator_MA_gpu(const int num_PIs, 
-                                const int num_inner_gates,
-                                const int num_POs, 
-                                const int sum_pi_gates_pos,
-                                const int num_pattern, 
-                                const size_t num_rounds,
-                                const int num_fault, 
-                                const int *_pi_gate_po_gate_type_gpu,
-                                const uint32_t *_patterns_gpu,
-                                const int *_fault_gate_idx_gpu,
-                                const size_t *_fault_SA_fault_val_gpu,
-                                uint32_t *_pi_gate_po_output_res_gpu,
-                                std::vector<int> &_numGates_per_level,
-                                const int *_numGates_per_level_gpu,
-                                const int _total_num_levels,
-                                const int *_invAdj_gpu,
-                                const int *_invAdj_index_table_gpu,
-                                const std::vector<Pattern> _patterns,
-                                const size_t NUM_SIMULATION_RDS,
-                                const int *_st_ld_CLIdxs_gpu,
-                                const int *_st_ld_positi_gpu,
-                                const int *_st_ld_CLs_index_table_gpu,
-                                uint32_t *_gpu_sync,
-                                const int used_num_blocks,
-                                const int num_threads,
-                                const uint32_t *_num_needed_blocks_gpu) {
-    // Get vars   
-    _num_PIs = num_PIs;
-    _num_inner_gates = num_inner_gates;
-    _num_POs = num_POs;
-    _sum_pi_gates_pos = sum_pi_gates_pos;
-    _num_pattern = num_pattern;
-    _num_rounds = num_rounds;
-    _num_fault = num_fault;
-    _used_num_blocks = used_num_blocks; 
-    _num_threads = num_threads;
-    // printf("Get inside run_gpu_simulator_MA_gpu\n");
-    
-    // Run simulation
-    for (size_t rd = 0; rd < NUM_SIMULATION_RDS; rd++) {
-      _run_gates_MA_gpu(_total_num_levels, 
-                        _numGates_per_level,
-                        _numGates_per_level_gpu,
-                        _invAdj_gpu,
-                        _invAdj_index_table_gpu,
-                        _pi_gate_po_gate_type_gpu, 
-                        _patterns_gpu,
-                        _patterns,
-                        _fault_gate_idx_gpu,
-                        _fault_SA_fault_val_gpu,
-                        _pi_gate_po_output_res_gpu, 
-                        _st_ld_CLIdxs_gpu, 
-                        _st_ld_positi_gpu, 
-                        _st_ld_CLs_index_table_gpu,
-                        _gpu_sync,
-                        _num_needed_blocks_gpu);
-    } // NUM_SIMULATION_RDS
-  }
-
-
 private:
   // vars
   int _num_PIs; 
@@ -290,41 +228,6 @@ private:
                                     const size_t bits,
                                     const size_t rd, 
                                     uint32_t *_pi_gate_po_output_res_gpu);
-  // MA simulation
-  void _run_gates_MA_gpu(const int _total_num_levels, 
-                        const std::vector<int> &_numGates_per_level,
-                        const int *_numGates_per_level_gpu,
-                        const int *_invAdj_gpu,
-                        const int *_invAdj_index_table_gpu,
-                        const int *_pi_gate_po_gate_type_gpu,
-                        const uint32_t *_patterns_gpu,
-                        const std::vector<Pattern> _patterns,
-                        const int *_fault_gate_idx_gpu,
-                        const size_t *_fault_SA_fault_val_gpu,
-                        uint32_t *_pi_gate_po_output_res_gpu,
-                        const int *_st_ld_CLIdxs_gpu,
-                        const int *_st_ld_positi_gpu,
-                        const int *_st_ld_CLs_index_table_gpu,
-                        uint32_t *_gpu_sync,
-                        const uint32_t *_num_needed_blocks_gpu);
-  void _run_cones_good_case_MA_gpu(const int _total_num_levels, 
-                                    const std::vector<int> &_numGates_per_level,
-                                    const int *_numGates_per_level_gpu,
-                                    const int *_invAdj_gpu,
-                                    const int *_invAdj_index_table_gpu,
-                                    const int *_pi_gate_po_gate_type_gpu,
-                                    const uint32_t *_patterns_gpu,
-                                    const int *_fault_gate_idx_gpu,
-                                    const size_t *_fault_SA_fault_val_gpu,
-                                    const size_t bits,
-                                    const size_t rd, 
-                                    uint32_t *_pi_gate_po_output_res_gpu,
-                                    const int *_st_ld_CLIdxs_gpu,
-                                    const int *_st_ld_positi_gpu,
-                                    const int *_st_ld_CLs_index_table_gpu,
-                                    uint32_t *_gpu_sync,
-                                    const uint32_t *_num_needed_blocks_gpu); 
-                        
 };
 
 #endif  // GALPS_MA_GPU_SIMULATION_H

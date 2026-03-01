@@ -52,9 +52,7 @@ constexpr uint32_t UINT32T_BITS = std::numeric_limits<uint32_t>::digits;
         } \
     } while (0)
 
-
-
-void GALPS_MA_GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
+void GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
                                               const std::vector<int> &_numGates_per_level,
                                               const int *_numGates_per_level_gpu,
                                               const int *_invAdj_gpu,
@@ -87,34 +85,34 @@ void GALPS_MA_GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
                                   num_testcases_this_round,  // bits 
                                   rd, 
                                   _pi_gate_po_output_res_gpu);
-#ifdef PRINT_SIMULATION_OUTPUTS_DSP
-    if (rd == 0) {
-      // shift and copy answer to the good results
-      int num_blocks = (_sum_pi_gates_pos > _NUM_THREADS) ? 
-                       (_sum_pi_gates_pos + _NUM_THREADS - 1)/_NUM_THREADS : 
-                       (1);//1;
-      int num_threads = (_sum_pi_gates_pos > _NUM_THREADS) ? 
-                        (_NUM_THREADS) : 
-                        (_sum_pi_gates_pos);    
-      _write_and_shift_to_array_gpu <<< num_blocks, num_threads >>> (num_testcases_this_round, 
-                                                                    _pi_gate_po_output_res_gpu,
-                                                                    _sum_pi_gates_pos);
-      cudaCheckErrors("CUDA: _write_and_shift_to_array_gpu launch- Failure");
+    #ifdef PRINT_SIMULATION_OUTPUTS_DSP
+      if (rd == 0) {
+        // shift and copy answer to the good results
+        int num_blocks = (_sum_pi_gates_pos > _NUM_THREADS) ? 
+                        (_sum_pi_gates_pos + _NUM_THREADS - 1)/_NUM_THREADS : 
+                        (1);//1;
+        int num_threads = (_sum_pi_gates_pos > _NUM_THREADS) ? 
+                          (_NUM_THREADS) : 
+                          (_sum_pi_gates_pos);    
+        _write_and_shift_to_array_gpu <<< num_blocks, num_threads >>> (num_testcases_this_round, 
+                                                                      _pi_gate_po_output_res_gpu,
+                                                                      _sum_pi_gates_pos);
+        cudaCheckErrors("CUDA: _write_and_shift_to_array_gpu launch- Failure");
 
-      cudaDeviceSynchronize();
-      cudaCheckErrors("CUDA: cudaDeviceSynchronize - Failure");
-      
-      std::cout << "GOOD resutls ans:" << std::endl;
-      _print_simulation_results <<< 1, 1 >>> (_pi_gate_po_output_res_gpu, _sum_pi_gates_pos);
-      cudaDeviceSynchronize();
-      cudaCheckErrors("CUDA: _print_simulation_results cudaDeviceSynchronize - Failure");
-    }
-#endif
+        cudaDeviceSynchronize();
+        cudaCheckErrors("CUDA: cudaDeviceSynchronize - Failure");
+        
+        std::cout << "GOOD resutls ans:" << std::endl;
+        _print_simulation_results <<< 1, 1 >>> (_pi_gate_po_output_res_gpu, _sum_pi_gates_pos);
+        cudaDeviceSynchronize();
+        cudaCheckErrors("CUDA: _print_simulation_results cudaDeviceSynchronize - Failure");
+      }
+    #endif
   }
 }
 
 
-void GALPS_MA_GPUSimulator::_run_cones_good_case_DSP_gpu(const int _total_num_levels,
+void GPUSimulator::_run_cones_good_case_DSP_gpu(const int _total_num_levels,
                                                         const std::vector<int> &_numGates_per_level,
                                                         const int *_numGates_per_level_gpu,
                                                         const int *_invAdj_gpu,
@@ -150,130 +148,11 @@ void GALPS_MA_GPUSimulator::_run_cones_good_case_DSP_gpu(const int _total_num_le
                                                     _num_PIs);
     num_accumGates += num_gates_per_level; 
     
-// #ifdef GPU_PART_DEBUG_PRINT_SIMULATION
-  cudaDeviceSynchronize();
-// #endif      
+  #ifdef GPU_PART_DEBUG_PRINT_SIMULATION
+    cudaDeviceSynchronize();
+  #endif      
   }
 }
-
-void GALPS_MA_GPUSimulator::_run_gates_MA_gpu(const int _total_num_levels, 
-                                              const std::vector<int> &_numGates_per_level,
-                                              const int *_numGates_per_level_gpu,
-                                              const int *_invAdj_gpu,
-                                              const int *_invAdj_index_table_gpu,
-                                              const int *_pi_gate_po_gate_type_gpu,
-                                              const uint32_t *_patterns_gpu,
-                                              const std::vector<Pattern> _patterns,
-                                              const int *_fault_gate_idx_gpu,
-                                              const size_t *_fault_SA_fault_val_gpu,
-                                              uint32_t *_pi_gate_po_output_res_gpu,
-                                              const int *_st_ld_CLIdxs_gpu,
-                                              const int *_st_ld_positi_gpu,
-                                              const int *_st_ld_CLs_index_table_gpu,
-                                              uint32_t *_gpu_sync,
-                                              const uint32_t *_num_needed_blocks_gpu) {
-#ifdef GPU_PART_DEBUG_PRINT_SIMULATION
-  std::cout << "execute simulation._run_gates_MA_gpu();\n";
-#endif
-
-  // Simulation
-  // for (size_t rd = 0; rd < 1; rd++) {
-  for (size_t rd = 0; rd < _num_rounds; rd++) {
-    size_t num_testcases_this_round =
-        ((_num_pattern / (UINT32T_BITS * (rd + 1))))
-            ? (UINT32T_BITS)
-            : (_num_pattern % UINT32T_BITS);
-    _run_cones_good_case_MA_gpu(_total_num_levels, 
-                                  _numGates_per_level, 
-                                  _numGates_per_level_gpu,
-                                  _invAdj_gpu, 
-                                  _invAdj_index_table_gpu, 
-                                  _pi_gate_po_gate_type_gpu, 
-                                  _patterns_gpu,
-                                  _fault_gate_idx_gpu, 
-                                  _fault_SA_fault_val_gpu,
-                                  num_testcases_this_round,  // bits 
-                                  rd, 
-                                  _pi_gate_po_output_res_gpu,
-                                  _st_ld_CLIdxs_gpu,
-                                  _st_ld_positi_gpu,
-                                  _st_ld_CLs_index_table_gpu,
-                                  _gpu_sync, _num_needed_blocks_gpu);
-#ifdef PRINT_SIMULATION_OUTPUTS_CACHE
-    if (rd == 0) {
-      // shift and copy answer to the good results
-      int num_blocks = (_sum_pi_gates_pos > _NUM_THREADS) ? 
-                       (_sum_pi_gates_pos + _NUM_THREADS - 1)/_NUM_THREADS : 
-                       (1);//1;
-      int num_threads = (_sum_pi_gates_pos > _NUM_THREADS) ? 
-                        (_NUM_THREADS) : 
-                        (_sum_pi_gates_pos);    
-      _write_and_shift_to_array_gpu <<< num_blocks, num_threads >>> (num_testcases_this_round, 
-                                                                    _pi_gate_po_output_res_gpu,
-                                                                    _sum_pi_gates_pos);
-      cudaCheckErrors("CUDA: _write_and_shift_to_array_gpu launch- Failure");
-
-      cudaDeviceSynchronize();
-      cudaCheckErrors("CUDA: cudaDeviceSynchronize - Failure");
-      
-      std::cout << "GOOD resutls ans:" << std::endl;
-      _print_simulation_results <<< 1, 1 >>> (_pi_gate_po_output_res_gpu, _sum_pi_gates_pos);
-      cudaDeviceSynchronize();
-      cudaCheckErrors("CUDA: _print_simulation_results cudaDeviceSynchronize - Failure");
-    }
-#endif
-  }
-}
-
-void GALPS_MA_GPUSimulator::_run_cones_good_case_MA_gpu(const int _total_num_levels,
-                                                        const std::vector<int> &_numGates_per_level,
-                                                        const int *_numGates_per_level_gpu,
-                                                        const int *_invAdj_gpu,
-                                                        const int *_invAdj_index_table_gpu,
-                                                        const int *_pi_gate_po_gate_type_gpu,
-                                                        const uint32_t *_patterns_gpu,
-                                                        const int *_fault_gate_idx_gpu,
-                                                        const size_t *_fault_SA_fault_val_gpu,
-                                                        const size_t bits,
-                                                        const size_t rd, 
-                                                        uint32_t *_pi_gate_po_output_res_gpu, 
-                                                        const int *_st_ld_CLIdxs_gpu,
-                                                        const int *_st_ld_positi_gpu,
-                                                        const int *_st_ld_CLs_index_table_gpu,
-                                                        uint32_t *_gpu_sync,
-                                                        const uint32_t *_num_needed_blocks_gpu) {
-  // printf("Getting inside _run_cones_good_case_MA_gpu\n");
-  const size_t fault_num = 0; const size_t bad_case = 0;
-  // printf("num_blocks = %d, num_threads = %d\n", _used_num_blocks, _num_threads);
-
-  int *bibicheck; 
-  // cudaMalloc((void**)&bibicheck, _sum_pi_gates_pos*sizeof(int));
-  // cudaMemset(bibicheck, 0, _sum_pi_gates_pos*sizeof(int));
-
-  _run_gate_MA <<< _used_num_blocks, _num_threads >>> (_used_num_blocks, _gpu_sync, _sum_pi_gates_pos, 
-                                                      _numGates_per_level_gpu, _total_num_levels, 
-                                                      _invAdj_gpu, _invAdj_index_table_gpu, 
-                                                      _pi_gate_po_gate_type_gpu, _pi_gate_po_output_res_gpu, 
-                                                      _patterns_gpu, rd, 
-                                                      _fault_gate_idx_gpu, _fault_SA_fault_val_gpu, 
-                                                      fault_num, bad_case, 
-                                                      _num_PIs, 
-                                                      _st_ld_CLIdxs_gpu, _st_ld_positi_gpu, 
-                                                      _st_ld_CLs_index_table_gpu,
-                                                      _num_needed_blocks_gpu,
-                                                      bibicheck);
-
-#ifdef GPU_PART_DEBUG_PRINT_SIMULATION
-  cudaDeviceSynchronize();
-#endif  
-}
-
-
-
-
-
-
-
 
 
 // ----------------------------------------------------- PURE DSP STARTS -----------------------------------------------------

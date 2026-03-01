@@ -405,8 +405,8 @@ void CUDAMAPartitioner::prepare_gpu_simulation() {
 
 
 // Simulation functions 
-void CUDAMAPartitioner::run(const size_t num_threads, const size_t NUM_SIMULATION_RDS) {  
-  GALPS_MA_GPUSimulator gpuSimulator; 
+void CUDAMAPartitioner::run(const size_t NUM_SIMULATION_RDS) {  
+  GPUSimulator gpuSimulator; 
   gpuSimulator.run_gpu_simulator_DSP_gpu(_num_PIs, _num_inner_gates, _num_POs, 
                                           _sum_pi_gates_pos, 
                                           _num_pattern, _num_rounds, _num_fault,

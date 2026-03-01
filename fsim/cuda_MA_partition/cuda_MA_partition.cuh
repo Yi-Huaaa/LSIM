@@ -119,13 +119,14 @@ __global__ void print_ask_gpu_simulation_memory(const size_t sz1,
                                                 
 __global__ void print_patterns_gpu (uint32_t *_patterns_gpu, size_t _num_rounds, size_t _num_PIs);
 /* Forward declaration */
-class CUDASimulator;
+// class CUDASimulator;
+class GPUSimulator; 
 
 class CUDAMAPartitioner {
   
   // Declare friend class 
   friend class CUDASimulator;
-  friend class GALPS_MA_GPUSimulator; 
+  friend class GPUSimulator; 
 
 public:
 
@@ -138,7 +139,7 @@ public:
   // preparation 
   void prepare_gpu_simulation();
 
-  void run(const size_t num_threads, const size_t NUM_SIMULATION_RDS);
+  void run(const size_t NUM_SIMULATION_RDS = 1);
   void freeMem() { _free(); }
 
 private:
