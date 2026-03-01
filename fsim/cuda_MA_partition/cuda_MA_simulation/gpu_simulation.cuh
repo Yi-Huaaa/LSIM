@@ -1,5 +1,5 @@
-#ifndef GALPS_MA_GPU_SIMULATION_H
-#define GALPS_MA_GPU_SIMULATION_H
+#ifndef MA_GPU_SIMULATION_H
+#define MA_GPU_SIMULATION_H
 #include <chrono>
 #include <thread>
 #include <assert.h>
@@ -27,9 +27,6 @@
 #include <cuda_runtime_api.h>
 #include <cublas_v2.h>
 #include <set>
-
-// constexpr uint32_t UINT32T_BITS = std::numeric_limits<uint32_t>::digits;
-
 
 // error checking macro
 #define cudaCheckErrors(msg) \
@@ -91,47 +88,6 @@ __device__ __forceinline__ void _apply_PO_MA(const int gate_idx, const int *_inv
                                           uint32_t *cache, const uint32_t *g_c_table, const uint32_t *pos_table);
 __device__ __forceinline__ int _getSLIdx(const int *_st_ld_CLs_index_table_gpu, const int l, const int cases);
 __device__ __forceinline__ void _modify_bits(uint32_t *a, const int p, const int val);
-__device__ __forceinline__ int _get_CLIdx(int gateIdx);
-__device__ __forceinline__ uint32_t _get_bits(const uint32_t *value, const int p);
-__device__ __forceinline__ int _get_g_c(const uint32_t *g_c_table, const int CLIdx);
-__device__ __forceinline__ int _get_pos(const int gate_idx, const uint32_t *pos_table, const int CLIdx);
-__device__ __forceinline__ uint32_t _get_val(const int gate_idx, 
-                                            const uint32_t *_pi_gate_po_output_res_gpu, const uint32_t *cache, 
-                                            const uint32_t *g_c_table, const uint32_t *pos_table);
-__device__ __forceinline__ void _wb_val(const int gate_idx, const uint32_t wb_val, 
-                                      uint32_t *_pi_gate_po_output_res_gpu, uint32_t *cache, 
-                                      const uint32_t *g_c_table, const uint32_t *pos_table);
-__device__ __forceinline__ void _wb_neg_val(const int gate_idx, const uint32_t wb_val, 
-                                            uint32_t *_pi_gate_po_output_res_gpu, uint32_t *cache, 
-                                            const uint32_t *g_c_table, const uint32_t *pos_table);                                      
-__device__ __forceinline__ void __syncthreadsAllBlocks(uint32_t *_gpu_sync, 
-                                                      const int l, 
-                                                      const int num_blocks);
-__device__ __forceinline__ void __syncthreadsAllBlocks_early_ret(uint32_t *_gpu_sync, const uint32_t acc);
-__device__ void _run_gate_MA_thd(const int real_g_idx, const int num_gates_per_level, const int num_accumGates, 
-                                const int SA_fault, 
-                                const int *_invAdj_gpu, const int *_invAdj_index_table_gpu, 
-                                const int *_pi_gate_po_gate_type_gpu, uint32_t *_pi_gate_po_output_res_gpu, 
-                                const uint32_t *_patterns_gpu, const size_t rd, 
-                                const int _num_PIs,
-                                const int *_st_ld_CLIdxs_gpu,
-                                const int *_st_ld_positi_gpu,
-                                const int *_st_ld_CLs_index_table_gpu,
-                                uint32_t *cache, const uint32_t *g_c_table, const uint32_t *pos_table,
-                                int *bibicheck);
-__global__ void _run_gate_MA(const int num_blocks, uint32_t *_gpu_sync, const int _sum_pi_gates_pos, 
-                            const int *_numGates_per_level_gpu, const int _total_num_levels, 
-                            const int *_invAdj_gpu, const int *_invAdj_index_table_gpu, 
-                            const int *_pi_gate_po_gate_type_gpu, uint32_t *_pi_gate_po_output_res_gpu, 
-                            const uint32_t *_patterns_gpu, const size_t rd, 
-                            const int *_fault_gate_idx_gpu, const size_t *_fault_SA_fault_val_gpu,
-                            const size_t fault_num, const size_t bad_case, 
-                            const int _num_PIs, 
-                            const int *_st_ld_CLIdxs_gpu,
-                            const int *_st_ld_positi_gpu,
-                            const int *_st_ld_CLs_index_table_gpu,
-                            const uint32_t *_num_needed_blocks_gpu,
-                          int* bibicheck);
 __global__ void _write_and_shift_to_array_gpu(const size_t bits, 
                                               uint32_t *_pi_gate_po_output_res_gpu, 
                                               const int total_num_gates);
@@ -230,4 +186,4 @@ private:
                                     uint32_t *_pi_gate_po_output_res_gpu);
 };
 
-#endif  // GALPS_MA_GPU_SIMULATION_H
+#endif  // MA_GPU_SIMULATION_H
