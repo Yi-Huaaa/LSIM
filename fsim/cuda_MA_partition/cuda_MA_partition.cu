@@ -24,13 +24,12 @@
 #include <ranges>
 #include <random>
 
-
 #include <cuda_runtime_api.h>
 #include <cublas_v2.h>
 
 #include "cuda_MA_partition.cuh"
 #include <fsim/cuda_MA_partition/cuda_MA_simulation/gpu_simulation.cuh>
-// #define SAMPLING // 20250327
+
 
 // error checking macro
 #define cudaCheckErrors(msg) \
@@ -48,7 +47,6 @@
 // Read files
 void CUDAMAPartitioner::read(const std::string &ckt_path, const std::string &flst_path, const std::string &ptn_path) {
   // printf("Get inside CUDAMAPartitioner::read first\n");
-
   using std::string_literals::operator""s;
 
   std::ifstream ckt(ckt_path), flst(flst_path), ptn(ptn_path);
@@ -67,6 +65,7 @@ void CUDAMAPartitioner::read(std::istream &ckt, std::istream &flst, std::istream
   ckt >> _num_PIs >> _num_POs >> _num_inner_gates >> _num_wires; 
   _sum_pi_gates_pos = _num_PIs + _num_inner_gates + _num_POs;
   _read_graph(ckt); _read_fault(flst); _read_pattern(ptn);
+  _test_parent_dist(); _test_spatial_locality(); _test_unique_parent_count();
 }
 
 void CUDAMAPartitioner::_read_graph(std::istream &ckt) {
@@ -225,7 +224,126 @@ void CUDAMAPartitioner::_read_pattern(std::istream &ptn) {
   }
 }
 
+void CUDAMAPartitioner::_test_parent_dist() {
+  int acc_num_gate = 0;
+  printf("Level | Avg_Dist | Max_Span | #Gates \n");
+  printf("------|----------|----------|--------\n");
 
+  for (int level = 0; level < _total_num_levels; ++level) {
+    const int num_gates_per_level = _numGates_per_level[level];
+    if (num_gates_per_level == 0) continue;
+
+    double total_node_avg_dist = 0;
+    int max_span_in_level = 0;
+
+    for (int g = 0; g < num_gates_per_level; g++) {
+      const int gate_idx = acc_num_gate + g;
+      double current_node_dist_sum = 0;
+      int current_node_parents = 0;
+
+      for (int p = _invAdj_index_table[2*gate_idx+0]; p < _invAdj_index_table[2*gate_idx+1]; p++) {
+        int parent_idx = _invAdj[p];
+        int pl = _level_of_gates[parent_idx];
+        int dist = level - pl;
+        
+        current_node_dist_sum += dist;
+        current_node_parents++;
+        if (dist > max_span_in_level) max_span_in_level = dist;
+        
+        if (pl >= level) {
+          printf("Error: DAG Violation at Gate %d (pl=%d, cl=%d)\n", gate_idx, pl, level); 
+          exit(1);
+        }
+      }
+      
+      if (current_node_parents > 0) {
+        total_node_avg_dist += (current_node_dist_sum / current_node_parents);
+      }
+    }
+
+    double final_avg_dist = total_node_avg_dist / num_gates_per_level;
+    printf("%5d | %8.3f | %8d | %6d\n", 
+           level, final_avg_dist, max_span_in_level, num_gates_per_level);
+           
+    acc_num_gate += num_gates_per_level; 
+  }
+}
+
+void CUDAMAPartitioner::_test_spatial_locality() {
+  int acc_num_gate = 0;
+  for (int level = 0; level < _total_num_levels; ++level) {
+    const int num_gates = _numGates_per_level[level];
+    long long total_range = 0;
+    int warp_count = 0;
+
+    // 以 Warp (32 threads) 為單位檢查
+    for (int i = 0; i < num_gates; i += 32) {
+      int min_pid = INT_MAX;
+      int max_pid = 0;
+      warp_count++;
+
+      for (int j = 0; j < 32 && (i + j) < num_gates; j++) {
+        int gate_idx = acc_num_gate + i + j;
+        for (int p = _invAdj_index_table[2*gate_idx+0]; p < _invAdj_index_table[2*gate_idx+1]; p++) {
+          int pid = _invAdj[p];
+          if (pid < min_pid) min_pid = pid;
+          if (pid > max_pid) max_pid = pid;
+        }
+      }
+      if (min_pid != INT_MAX) total_range += (max_pid - min_pid);
+    }
+    
+    if (warp_count > 0) {
+      printf("Level %d | Avg Warp Parent Range: %.2f\n", level, (double)total_range / warp_count);
+    }
+    acc_num_gate += num_gates;
+  }
+}
+
+
+void CUDAMAPartitioner::_test_unique_parent_count() {
+  int acc_num_gate = 0;
+  printf("Level | Avg Unique Parents per Warp | #Gates | Reuse Status\n");
+  printf("------|----------------------------|--------|-------------\n");
+
+  for (int level = 0; level < _total_num_levels; ++level) {
+    const int num_gates = _numGates_per_level[level];
+    if (num_gates == 0) continue;
+
+    long long total_unique_count = 0;
+    int warp_count = 0;
+
+    // 以 Warp (32 threads) 為單位模擬 GPU 存取
+    for (int i = 0; i < num_gates; i += 32) {
+      std::unordered_set<int> unique_parents;
+      warp_count++;
+
+      // 遍歷 Warp 內的 32 個執行緒
+      for (int j = 0; j < 32 && (i + j) < num_gates; j++) {
+        int gate_idx = acc_num_gate + i + j;
+        
+        // 抓取該 Gate 所有的 Parent ID
+        for (int p = _invAdj_index_table[2*gate_idx+0]; 
+                 p < _invAdj_index_table[2*gate_idx+1]; p++) {
+          unique_parents.insert(_invAdj[p]);
+        }
+      }
+      total_unique_count += unique_parents.size();
+    }
+    
+    if (warp_count > 0) {
+      double avg_unique = (double)total_unique_count / warp_count;
+      
+      // 簡單的診斷邏輯
+      const char* status = (avg_unique < 5.0) ? "High Reuse" : 
+                           (avg_unique > 25.0) ? "Low Reuse (Bottleneck)" : "Medium";
+
+      printf("%5d | %26.2f | %6d | %s\n", 
+             level, avg_unique, num_gates, status);
+    }
+    acc_num_gate += num_gates;
+  }
+}
 
 /* Prepare for GPU simulation */
 void CUDAMAPartitioner::_topological_sort(std::vector<std::vector<int>> &adj, 
@@ -320,7 +438,7 @@ void CUDAMAPartitioner::_move_GateType_h2d() {
   }
 
   cudaMemcpyAsync(_pi_gate_po_gate_type_gpu, pi_gate_po_gate_type.data(), 
-                _sum_pi_gates_pos*sizeof(int), cudaMemcpyHostToDevice);
+                  _sum_pi_gates_pos*sizeof(int), cudaMemcpyHostToDevice);
   cudaCheckErrors("CUDA: _pi_gate_po_gate_type_gpu cudaMemcpy failure");
 
 #ifdef GPU_PREPARE_SIMULATION_PRINT_CHECK
@@ -330,7 +448,6 @@ void CUDAMAPartitioner::_move_GateType_h2d() {
   cudaDeviceSynchronize();
 #endif 
 }
-
 
 void CUDAMAPartitioner::_move_patterns_h2d() {
   std::vector<uint32_t> patterns_cpu;
@@ -394,15 +511,12 @@ void CUDAMAPartitioner::prepare_gpu_simulation() {
                   2*_sum_pi_gates_pos*sizeof(int), cudaMemcpyHostToDevice); 
   _ask_gpu_simulation_memory();
 
-  _move_GateType_h2d();
-  _move_patterns_h2d();
-  _move_faults___h2d();
+  _move_GateType_h2d(); _move_patterns_h2d(); _move_faults___h2d();
 
   auto end = std::chrono::steady_clock::now();
   std::chrono::duration<double> duration_prepare = end - start;
   std::cout << "prepare_GPU_simulation: " << _round_to((duration_prepare.count())*1000, 0.001) << "\n";
 }
-
 
 // Simulation functions 
 void CUDAMAPartitioner::run(const size_t NUM_SIMULATION_RDS) {  
@@ -412,8 +526,6 @@ void CUDAMAPartitioner::run(const size_t NUM_SIMULATION_RDS) {
                                           _num_pattern, _num_rounds, _num_fault,
                                           _pi_gate_po_gate_type_gpu, 
                                           _patterns_gpu,
-                                          _fault_gate_idx_gpu,
-                                          _fault_SA_fault_val_gpu,
                                           _pi_gate_po_output_res_gpu,
                                           _numGates_per_level,
                                           _numGates_per_level_gpu,
@@ -425,20 +537,10 @@ void CUDAMAPartitioner::run(const size_t NUM_SIMULATION_RDS) {
   cudaDeviceSynchronize();
 }
 
-
-
-
-
-
-
-// --------------- PRINT FUNCTIONS FOR CHECK THE CORRECTNESS ---------------
-// --------------- PRINT FUNCTIONS FOR CHECK THE CORRECTNESS ---------------
-// --------------- PRINT FUNCTIONS FOR CHECK THE CORRECTNESS ---------------
-// --------------- PRINT FUNCTIONS FOR CHECK THE CORRECTNESS ---------------
 // --------------- PRINT FUNCTIONS FOR CHECK THE CORRECTNESS ---------------
 void CUDAMAPartitioner::_print_patterns(const std::vector<Pattern> &patterns,
-                                        const int round,
-                                        const int num_PIs) const {
+  const int round, const int num_PIs) const 
+{
   std::cout << "\n=====\n\n";
     for (int i = 0; i < round; i++) {
       std::cout << "[" << UINT32T_BITS * i << ", " << UINT32T_BITS * (i + 1)
@@ -451,7 +553,8 @@ void CUDAMAPartitioner::_print_patterns(const std::vector<Pattern> &patterns,
 }
 
 void CUDAMAPartitioner::_print_bits_stack(const int size,
-                                      const void *const ptr) const {
+  const void *const ptr) const 
+{
   unsigned char *b = (unsigned char *)ptr;
   unsigned char byte;
   int i, j;
@@ -466,7 +569,8 @@ void CUDAMAPartitioner::_print_bits_stack(const int size,
 }
 
 // Function to convert GateType to gpuGateType
-gpuGateType CUDAMAPartitioner::_convertGateTypeToGpu(GateType gate_type) {
+gpuGateType CUDAMAPartitioner::_convertGateTypeToGpu(GateType gate_type)
+{
   switch (gate_type) {
     case GateType::INV: return gpuGateType::INV; // 0
     case GateType::AND: return gpuGateType::AND; // 1
@@ -484,7 +588,8 @@ gpuGateType CUDAMAPartitioner::_convertGateTypeToGpu(GateType gate_type) {
 }
 
 // Function to convert GateType to string
-std::string CUDAMAPartitioner::_gateTypeToString(GateType type) const {
+std::string CUDAMAPartitioner::_gateTypeToString(GateType type) const
+{
   switch (type) {
   case GateType::INV:
     return "INV"; // 0
@@ -513,7 +618,8 @@ std::string CUDAMAPartitioner::_gateTypeToString(GateType type) const {
   }
 }
 
-void CUDAMAPartitioner::_print_read_graph() const {
+void CUDAMAPartitioner::_print_read_graph() const
+{
   printf("Get inside _print_read_graph:\n");
 
   printf("_sum_pi_gates_pos = %d, _szOfAdj = %d\n", 
@@ -566,8 +672,9 @@ void CUDAMAPartitioner::_print_levelized(){
   printf("\n");
 }
 
-
-__global__ void print_patterns_gpu (uint32_t *_patterns_gpu, size_t _num_rounds, size_t _num_PIs) {
+__global__ void print_patterns_gpu (uint32_t *_patterns_gpu, 
+  size_t _num_rounds, size_t _num_PIs)
+{
   for (size_t i = 0; i < _num_rounds; i++) {
     printf("round %lu: ", i);
     for (size_t j = 0; j < _num_PIs; j++) {

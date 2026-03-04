@@ -195,6 +195,9 @@ private:
   void _construct_graph();
   void _read_pattern(std::istream &ptn);
   void _read_fault(std::istream &flst);
+  void _test_parent_dist();
+  void _test_spatial_locality();
+  void _test_unique_parent_count();
 
   /* Levelization */
   void _topological_sort(std::vector<std::vector<int>> &adj, 
