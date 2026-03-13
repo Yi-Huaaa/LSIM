@@ -22,7 +22,7 @@ make -j
 bash run.sh
 ```
 
-4. outputs should look like this:
+4. Outputs:
 ```
 --- Starting Test all C circuits ---
 Processing: c432
