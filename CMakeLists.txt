@@ -27,33 +27,25 @@ project(
   LANGUAGES CXX
 )
 
-# ---------------------------- 下面是支援 C++20 的部分 ----------------------------
-
 # -----------------------------------------------------------------------------
-# 設定 C++20 為標準
+# 設定 C++17 為標準
 # -----------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)  # 禁用 GNU 擴展，確保是標準 C++20
+set(CMAKE_CXX_EXTENSIONS OFF) 
 
 # -----------------------------------------------------------------------------
-# 如果啟用了 CUDA，則確保 CUDA 也使用 C++20
+# 如果啟用了 CUDA，則確保 CUDA 也使用 C++17
 # -----------------------------------------------------------------------------
 if (FSIM_BUILD_CUDA)
-    enable_language(CUDA)  # 確保啟用 CUDA
-    set(CMAKE_CUDA_STANDARD 17)  # CMake 目前不支援 CUDA20，需設為 17
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-    # **確保 NVCC 只使用一次 `--std=c++20`**
-    set(CMAKE_CUDA_FLAGS "--expt-relaxed-constexpr --std=c++20")  
+    # 這裡把 --std=c++20 拿掉，改回較乾淨的設定
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")  
 endif()
 
-# -----------------------------------------------------------------------------
-# 確保所有 target 繼承 C++20（只設定一次）
-# -----------------------------------------------------------------------------
-set(CMAKE_CXX_FLAGS "-std=c++20")
-
-# ---------------------------- 上面是支援 C++20 的部分 ----------------------------
 
 # -----------------------------------------------------------------------------
 # Add OpenMP

@@ -23,20 +23,11 @@ void GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
   const std::vector<Pattern> _patterns,
   uint32_t *_pi_gate_po_output_res_gpu) 
 {
-  // printf("_num_rounds = %u\n", _num_rounds);
-  for (int i = 0; i < _total_num_levels; i++) {
-    if (_numGates_per_level[i] > 10000) {
-      printf("Level %d is FAT: %d gates\n", i, _numGates_per_level[i]);
-    } else {
-      printf("Level %d is SKINNY: %d gates\n", i, _numGates_per_level[i]);
-    }
-  }
 
   _num_rounds = 1;  // use for profiling
   cudaEvent_t start, stop;
   CUDA_CHECK(cudaEventCreate(&start));
   CUDA_CHECK(cudaEventCreate(&stop));
-
 
   for (size_t rd = 0; rd < _num_rounds; rd++) {
     size_t num_testcases_this_round =
@@ -45,7 +36,6 @@ void GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
       : (_num_pattern % UINT32T_BITS);
 
     int num_blocks, num_threads; int num_accumGates = 0;
-
 
     for (int level = 0; level < _total_num_levels; level++) {
       const int num_gates_per_level = (_numGates_per_level[level]);
@@ -71,13 +61,11 @@ void GPUSimulator::_run_gates_DSP_gpu(const int _total_num_levels,
       CUDA_CHECK(cudaEventElapsedTime(&msec, start, stop));
       printf("Level %3d | Gates: %8d | Runtime: %8.3f us\n", 
             level, num_gates_per_level, msec * 1000.0);
-
       // cudaDeviceSynchronize();
     }
     
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-
 
     #ifdef PRINT_SIMULATION_OUTPUTS_DSP
       if (rd == 0) {

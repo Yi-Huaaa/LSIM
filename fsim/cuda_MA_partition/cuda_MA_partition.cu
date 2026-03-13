@@ -65,7 +65,7 @@ void CUDAMAPartitioner::read(std::istream &ckt, std::istream &flst, std::istream
   ckt >> _num_PIs >> _num_POs >> _num_inner_gates >> _num_wires; 
   _sum_pi_gates_pos = _num_PIs + _num_inner_gates + _num_POs;
   _read_graph(ckt); _read_fault(flst); _read_pattern(ptn);
-  _test_parent_dist(); _test_spatial_locality(); _test_unique_parent_count();
+  std::cout << "_num_PIs: " << _num_PIs << ", _num_POs: " << _num_POs << ", _num_inner_gates " << _num_inner_gates << "\n";
 }
 
 void CUDAMAPartitioner::_read_graph(std::istream &ckt) {
@@ -221,127 +221,6 @@ void CUDAMAPartitioner::_read_pattern(std::istream &ptn) {
       int idx = i;
       ptn >> _patterns[idx]._value[pi];
     }
-  }
-}
-
-void CUDAMAPartitioner::_test_parent_dist() {
-  int acc_num_gate = 0;
-  printf("Level | Avg_Dist | Max_Span | #Gates \n");
-  printf("------|----------|----------|--------\n");
-
-  for (int level = 0; level < _total_num_levels; ++level) {
-    const int num_gates_per_level = _numGates_per_level[level];
-    if (num_gates_per_level == 0) continue;
-
-    double total_node_avg_dist = 0;
-    int max_span_in_level = 0;
-
-    for (int g = 0; g < num_gates_per_level; g++) {
-      const int gate_idx = acc_num_gate + g;
-      double current_node_dist_sum = 0;
-      int current_node_parents = 0;
-
-      for (int p = _invAdj_index_table[2*gate_idx+0]; p < _invAdj_index_table[2*gate_idx+1]; p++) {
-        int parent_idx = _invAdj[p];
-        int pl = _level_of_gates[parent_idx];
-        int dist = level - pl;
-        
-        current_node_dist_sum += dist;
-        current_node_parents++;
-        if (dist > max_span_in_level) max_span_in_level = dist;
-        
-        if (pl >= level) {
-          printf("Error: DAG Violation at Gate %d (pl=%d, cl=%d)\n", gate_idx, pl, level); 
-          exit(1);
-        }
-      }
-      
-      if (current_node_parents > 0) {
-        total_node_avg_dist += (current_node_dist_sum / current_node_parents);
-      }
-    }
-
-    double final_avg_dist = total_node_avg_dist / num_gates_per_level;
-    printf("%5d | %8.3f | %8d | %6d\n", 
-           level, final_avg_dist, max_span_in_level, num_gates_per_level);
-           
-    acc_num_gate += num_gates_per_level; 
-  }
-}
-
-void CUDAMAPartitioner::_test_spatial_locality() {
-  int acc_num_gate = 0;
-  for (int level = 0; level < _total_num_levels; ++level) {
-    const int num_gates = _numGates_per_level[level];
-    long long total_range = 0;
-    int warp_count = 0;
-
-    // 以 Warp (32 threads) 為單位檢查
-    for (int i = 0; i < num_gates; i += 32) {
-      int min_pid = INT_MAX;
-      int max_pid = 0;
-      warp_count++;
-
-      for (int j = 0; j < 32 && (i + j) < num_gates; j++) {
-        int gate_idx = acc_num_gate + i + j;
-        for (int p = _invAdj_index_table[2*gate_idx+0]; p < _invAdj_index_table[2*gate_idx+1]; p++) {
-          int pid = _invAdj[p];
-          if (pid < min_pid) min_pid = pid;
-          if (pid > max_pid) max_pid = pid;
-        }
-      }
-      if (min_pid != INT_MAX) total_range += (max_pid - min_pid);
-    }
-    
-    if (warp_count > 0) {
-      printf("Level %d | Avg Warp Parent Range: %.2f\n", level, (double)total_range / warp_count);
-    }
-    acc_num_gate += num_gates;
-  }
-}
-
-
-void CUDAMAPartitioner::_test_unique_parent_count() {
-  int acc_num_gate = 0;
-  printf("Level | Avg Unique Parents per Warp | #Gates | Reuse Status\n");
-  printf("------|----------------------------|--------|-------------\n");
-
-  for (int level = 0; level < _total_num_levels; ++level) {
-    const int num_gates = _numGates_per_level[level];
-    if (num_gates == 0) continue;
-
-    long long total_unique_count = 0;
-    int warp_count = 0;
-
-    // 以 Warp (32 threads) 為單位模擬 GPU 存取
-    for (int i = 0; i < num_gates; i += 32) {
-      std::unordered_set<int> unique_parents;
-      warp_count++;
-
-      // 遍歷 Warp 內的 32 個執行緒
-      for (int j = 0; j < 32 && (i + j) < num_gates; j++) {
-        int gate_idx = acc_num_gate + i + j;
-        
-        // 抓取該 Gate 所有的 Parent ID
-        for (int p = _invAdj_index_table[2*gate_idx+0]; 
-                 p < _invAdj_index_table[2*gate_idx+1]; p++) {
-          unique_parents.insert(_invAdj[p]);
-        }
-      }
-      total_unique_count += unique_parents.size();
-    }
-    
-    if (warp_count > 0) {
-      double avg_unique = (double)total_unique_count / warp_count;
-      
-      // 簡單的診斷邏輯
-      const char* status = (avg_unique < 5.0) ? "High Reuse" : 
-                           (avg_unique > 25.0) ? "Low Reuse (Bottleneck)" : "Medium";
-
-      printf("%5d | %26.2f | %6d | %s\n", 
-             level, avg_unique, num_gates, status);
-    }
-    acc_num_gate += num_gates;
   }
 }
 

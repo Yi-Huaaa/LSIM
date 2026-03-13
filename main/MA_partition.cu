@@ -6,9 +6,6 @@
 
 #include <fsim/cuda_MA_partition/fsim_cuda_MA_partition.cuh>
 
-constexpr size_t TIMES = 1;
-#define SIMU_MODE 1
-
 constexpr std::chrono::duration<double> chro_zero() {
   return std::chrono::duration<double>::zero();
 }
@@ -18,8 +15,8 @@ double round_to(double value, double precision = 1.0){
 }
 
 int main(int argc, char *argv[]) {
-  if (argc < 7) {
-    std::cerr << "Usage: " << argv[0] << " <ckt_path> <flst_path> <ptn_path> <hypergraph_path> <outputfile_path> <num_simulation_rds>" << std::endl;
+  if (argc < 4) {
+    std::cerr << "Usage: " << argv[0] << " <ckt_path> <flst_path> <ptn_path>" << std::endl;
     return 1;
   }
 
@@ -30,11 +27,6 @@ int main(int argc, char *argv[]) {
   std::string ckt_path(argv[1]);
   std::string flst_path(argv[2]);
   std::string ptn_path(argv[3]);
-  std::string hypergraph_path(argv[4]);
-  std::string outputfile_path(argv[5]);
-
-  // New input for number of simulation rounds
-  size_t _NUM_SIMULATION_RDS = std::atoi(argv[6]);
 
   // user perspective
   CUDAMAPartitioner cudaMAPartitioner;
@@ -45,20 +37,10 @@ int main(int argc, char *argv[]) {
   // Prepare Simulator
   cudaMAPartitioner.prepare_gpu_simulation();
 
-  // pre-run
-  // cudaMAPartitioner.run(_NUM_SIMULATION_RDS);
+  // Input for number of simulation rounds
+  const size_t _NUM_SIMULATION_RDS = 1; 
   cudaMAPartitioner.run(_NUM_SIMULATION_RDS);
   
-  // dur_sim = chro_zero();
-  // // Run Simulator
-  // for (size_t t = 0; t < TIMES; t++) {
-  //   auto start = std::chrono::steady_clock::now();
-  //   cudaMAPartitioner.run(_NUM_SIMULATION_RDS);
-  //   auto end = std::chrono::steady_clock::now();
-  //   dur_sim += (end - start);
-  // }
-  // std::cout << "run DSP simulation: " <<  round_to(((dur_sim.count()/TIMES))*1000, 0.001) << "\n";
-
   // free memory
   cudaMAPartitioner.freeMem();
   
