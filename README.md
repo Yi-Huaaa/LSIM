@@ -1,4 +1,9 @@
-# Logic simulation on GPU
+# Logic simulation on GPU for ECE757 benchmark
+
+# Clone
+```
+git clone -b ECE757 https://github.com/Yi-Huaaa/LSIM.git
+```
 
 ## Build and run
 ```
